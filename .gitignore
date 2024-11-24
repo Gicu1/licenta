@@ -1,2 +1,6 @@
 /temp
 /__pycache__
+/results/temp
+results/simulation_log.txt
+/simulation_output
+/results/robot_simulation.gif
