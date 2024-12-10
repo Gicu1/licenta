@@ -1,6 +1,5 @@
 import heapq
-import math
-
+import numpy as np
 
 class Robot:
     def __init__(self, start_x, start_y, goal_x, goal_y, speed=1):
@@ -12,146 +11,141 @@ class Robot:
         self.speed = speed
         self.grid = None
         self.waiting = False
-        self.stuck_count = 0
-        self.reserved_positions = {}
+        self.planned_path = []
+        self.id = id(self)
 
-    def move_towards_goal(self, grid, other_robots):
+    def calculate_distance_to_goal(self):
+        return abs(self.x - self.goal_x) + abs(self.y - self.goal_y)
+
+    def move_towards_goal(self, grid, other_robots, current_time):
         self.grid = grid
 
-        # Check if robot is already at the goal
         if (self.x, self.y) == (self.goal_x, self.goal_y):
+            return False  # Already at the goal
+
+        if not self.planned_path or self.path_conflict(other_robots, current_time):
+            path = self.cooperative_a_star_pathfinding(
+                (self.x, self.y),
+                (self.goal_x, self.goal_y),
+                other_robots,
+                current_time
+            )
+            if path:
+                self.planned_path = path
+            else:
+                self.waiting = True
+                return False  # Cannot find a path, wait
+
+        if len(self.planned_path) > 1:
+            next_position = self.planned_path[1]
+            self.x, self.y = next_position
+            self.path.append((self.x, self.y))
+            self.planned_path.pop(0)
             return True
-
-        if self.waiting:
-            self.waiting = False
-            return False
-
-        # Reserve current position
-        self.reserved_positions[(self.x, self.y)] = self
-
-        # Attempt to find a path
-        path = self.a_star_pathfinding((self.x, self.y), (self.goal_x, self.goal_y), other_robots)
-
-        if not path:
-            self.stuck_count += 1
-            if self.stuck_count > 3:
-                # Make random adjustments to resolve deadlock
-                possible_moves = self.get_possible_moves(other_robots)
-                if possible_moves:
-                    next_position = possible_moves[0]
-                    self.x, self.y = next_position
-                    self.path.append((self.x, self.y))
-                    return True
-                self.waiting = True
-                return False
         else:
-            self.stuck_count = 0
+            return False  # Path is empty, wait
 
-        # Move along the path if it's valid
-        if path and len(path) > 1:
-            next_position = path[1]
-            if self.can_move_to(next_position, other_robots):
-                self.x, self.y = next_position
-                self.path.append((self.x, self.y))
-                self.reserved_positions[next_position] = self
+    def path_conflict(self, other_robots, current_time):
+        for robot in other_robots:
+            if robot is self:
+                continue
+            future_pos = robot.get_future_position(current_time + 1)
+            if future_pos == (self.x, self.y):
                 return True
-            elif self.should_wait(next_position, other_robots):
-                self.waiting = True
-                return False
-
         return False
 
-    def can_move_to(self, position, other_robots):
-        """Check if the robot can move to the next position."""
-        return not self.check_for_collisions(position[0], position[1], other_robots)
-
-    def should_wait(self, next_position, other_robots):
-        """Determine if the robot should wait based on shared path reservations."""
-        for other in other_robots:
-            if other is not self:
-                if (other.x, other.y) == next_position or next_position in other.reserved_positions:
-                    # Prioritize robot closer to the goal
-                    my_dist = abs(self.x - self.goal_x) + abs(self.y - self.goal_y)
-                    other_dist = abs(other.x - other.goal_x) + abs(other.y - other.goal_y)
-                    if my_dist > other_dist:
-                        return True
-        return False
-
-    def get_possible_moves(self, other_robots):
-        """Find all possible moves from the current position."""
-        moves = []
-        directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
-        for dx, dy in directions:
-            new_x, new_y = self.x + dx, self.y + dy
-            if (0 <= new_x < len(self.grid) and
-                0 <= new_y < len(self.grid[0]) and
-                self.grid[new_x][new_y] == 0 and
-                not self.check_for_collisions(new_x, new_y, other_robots)):
-                moves.append((new_x, new_y))
-        return moves
-
-    def a_star_pathfinding(self, start, goal, other_robots):
+    def cooperative_a_star_pathfinding(self, start, goal, other_robots, current_time):
         def heuristic(a, b):
-            dx = abs(a[0] - b[0])
-            dy = abs(a[1] - b[1])
-            return max(dx, dy) + (math.sqrt(2) - 1) * min(dx, dy)
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-        neighbors = [(0, 1), (1, 0), (0, -1), (-1, 0), (1, 1), (1, -1), (-1, 1), (-1, -1)]
-        close_set = set()
+        directions = [
+            (0, 1),  (1, 0),  (0, -1), (-1, 0),
+            (1, 1),  (-1, -1), (1, -1), (-1, 1)
+        ]
+
+        # Build reservation table with vertex and edge collisions
+        reservation_table = {}
+        for robot in other_robots:
+            if robot is self:
+                continue
+            time = current_time
+            prev_pos = None
+            for pos in robot.planned_path:
+                reservation_table.setdefault((pos, time), robot.id)
+                if prev_pos is not None:
+                    edge = (prev_pos, pos)
+                    reservation_table.setdefault((edge, time - 1), robot.id)
+                prev_pos = pos
+                time += 1
+            # Reserve the goal position for other robots after they arrive
+            if robot.planned_path:
+                final_pos = robot.planned_path[-1]
+                for t in range(time, time + 5):  # Reserve for additional steps
+                    reservation_table.setdefault((final_pos, t), robot.id)
+
+        open_set = []
+        heapq.heappush(open_set, (heuristic(start, goal), current_time, start))
         came_from = {}
-        gscore = {start: 0}
-        fscore = {start: heuristic(start, goal)}
-        oheap = []
+        g_score = {(start, current_time): 0}
 
-        heapq.heappush(oheap, (fscore[start], start))
-
-        while oheap:
-            current = heapq.heappop(oheap)[1]
+        while open_set:
+            _, time_step, current = heapq.heappop(open_set)
 
             if current == goal:
-                path = []
-                while current in came_from:
-                    path.append(current)
-                    current = came_from[current]
-                path.append(start)
-                return path[::-1]
+                # Reconstruct path
+                path = [current]
+                key = (current, time_step)
+                while key in came_from:
+                    key = came_from[key]
+                    path.append(key[0])
+                path.reverse()
+                return path
 
-            close_set.add(current)
+            for dx, dy in directions:
+                neighbor = (current[0] + dx, current[1] + dy)
+                next_time_step = time_step + 1
 
-            for i, j in neighbors:
-                neighbor = current[0] + i, current[1] + j
-
-                if not (0 <= neighbor[0] < len(self.grid) and 0 <= neighbor[1] < len(self.grid[0])):
-                    continue
-
+                if not (0 <= neighbor[0] < self.grid.shape[0] and 0 <= neighbor[1] < self.grid.shape[1]):
+                    continue  # Out of bounds
                 if self.grid[neighbor[0]][neighbor[1]] == 1:
+                    continue  # Obstacle
+
+                # Check for vertex collision
+                if reservation_table.get((neighbor, next_time_step)) is not None:
                     continue
 
-                if self.check_for_collisions(neighbor[0], neighbor[1], other_robots):
+                # Check for edge collision
+                edge = (current, neighbor)
+                reverse_edge = (neighbor, current)
+                if reservation_table.get((edge, time_step)) is not None or reservation_table.get((reverse_edge, time_step)) is not None:
                     continue
 
-                movement_cost = math.sqrt(2) if (i != 0 and j != 0) else 1
-                tentative_g_score = gscore[current] + movement_cost
+                tentative_g_score = g_score.get((current, time_step), float('inf')) + 1
+                neighbor_key = (neighbor, next_time_step)
 
-                if neighbor in close_set and tentative_g_score >= gscore.get(neighbor, float('inf')):
-                    continue
+                if tentative_g_score < g_score.get(neighbor_key, float('inf')):
+                    came_from[neighbor_key] = (current, time_step)
+                    g_score[neighbor_key] = tentative_g_score
+                    f_score = tentative_g_score + heuristic(neighbor, goal)
+                    heapq.heappush(open_set, (f_score, next_time_step, neighbor))
 
-                if tentative_g_score < gscore.get(neighbor, float('inf')):
-                    came_from[neighbor] = current
-                    gscore[neighbor] = tentative_g_score
-                    fscore[neighbor] = tentative_g_score + heuristic(neighbor, goal)
-                    heapq.heappush(oheap, (fscore[neighbor], neighbor))
+            # Option to wait in current position
+            next_time_step = time_step + 1
+            if reservation_table.get((current, next_time_step)) is None:
+                tentative_g_score = g_score.get((current, time_step), float('inf')) + 1
+                neighbor_key = (current, next_time_step)
+                if tentative_g_score < g_score.get(neighbor_key, float('inf')):
+                    came_from[neighbor_key] = (current, time_step)
+                    g_score[neighbor_key] = tentative_g_score
+                    f_score = tentative_g_score + heuristic(current, goal)
+                    heapq.heappush(open_set, (f_score, next_time_step, current))
 
-        return None
+        return None  # No path found
 
-    def check_for_collisions(self, x, y, other_robots, safety_distance=1.0):
-        for other in other_robots:
-            if other is not self:
-                dist = math.sqrt((other.x - x) ** 2 + (other.y - y) ** 2)
-                if dist < safety_distance:
-                    return True
-                for future_pos in other.path[-3:]:
-                    dist = math.sqrt((future_pos[0] - x) ** 2 + (future_pos[1] - y) ** 2)
-                    if dist < safety_distance:
-                        return True
-        return False
+    def get_future_position(self, t):
+        if t < len(self.planned_path):
+            return self.planned_path[t]
+        elif self.planned_path:
+            return self.planned_path[-1]
+        else:
+            return (self.x, self.y)

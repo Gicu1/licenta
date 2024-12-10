@@ -25,8 +25,12 @@ def run_simulation():
     # Add obstacles
     obstacles = [(4, 5), (5, 4), (5, 5), (5, 6), (5, 7), (15, 15), (15, 16),(2,9),(2,11),
                  (3,9),(3,11),(4,9),(4,11),(5,9),(5,11),(6,9),(6,11),(7,9),(7,11),(8,9),(8,11),
-                 (10,9),(10,11),(11,9),(11,11),(12,9),(12,11),(13,9),(13,11),(14,9),(14,11),(15,9),(15,11),(16,9),(16,11),
-                 (8,12),(9,12),(10,12),(8,8),(9,8),(10,8),(5,8),(8,13),(8,14),(8,15)]
+                 (10,9),(10,11),(11,9),(11,11),(12,9),(12,11),(13,11),(14,9),(14,11),(15,9),(15,11),(16,9),(16,11),
+                 (8,12),(9,12),(10,12),(8,8),(9,8),(10,8),(5,8),(8,13),(8,14),(8,15)
+                 , (9,9), (9,11)
+                 , (12,8),(14,8),(12,12),(14,12), (13,8), (13,12), (8,16), (8,17), (8,18), (8,19), (5,3), (5,2), (5,1)
+                #  ,(13,9)
+                 ]
     for (y, x) in obstacles:
         grid[y][x] = 1
 
@@ -44,8 +48,11 @@ def run_simulation():
     images = []
     colors = ['blue', 'green', 'red', 'purple', 'orange', 'brown']
 
+    # Variable to control whether to show the whole path or just the current position
+    show_path = False
+
     # Simulation steps
-    max_steps = 50
+    max_steps = 100
     log_path = os.path.join(results_dir, 'simulation_log.txt')
     with open(log_path, 'w') as log_file:
         for step in range(max_steps):
@@ -54,19 +61,21 @@ def run_simulation():
 
             # Move each robot
             for i, robot in enumerate(robots):
-                log_file.write(f"Robot {i} at ({robot.x}, {robot.y}) moving towards ({robot.goal_x}, {robot.goal_y})\n")
-                moved = robot.move_towards_goal(grid, robots)
+                moved = robot.move_towards_goal(grid, robots, step)
                 moves_made = moves_made or moved
-                log_file.write(f"Robot {i} new position: ({robot.x}, {robot.y})\n")
+                log_file.write(f"Robot {i} position: ({robot.x}, {robot.y})\n")
 
             # Create and save current map state
             plt.figure(figsize=(10, 10))
-            plt.imshow(grid, cmap='binary', interpolation='nearest')  # Adjust interpolation to 'nearest'
+            plt.imshow(grid, cmap='binary', interpolation='nearest')
 
-            # Plot robot paths
+            # Plot robot paths or current positions
             for i, robot in enumerate(robots):
-                plt.plot([pos[1] for pos in robot.path], [pos[0] for pos in robot.path], 
-                        color=colors[i], marker='o', label=f"Robot {i+1}")
+                if show_path:
+                    plt.plot([pos[1] for pos in robot.path], [pos[0] for pos in robot.path],
+                             color=colors[i % len(colors)], marker='o', label=f"Robot {i+1}")
+                else:
+                    plt.plot(robot.y, robot.x, color=colors[i % len(colors)], marker='o', label=f"Robot {i+1}")
 
             plt.title(f"Step {step+1}")
             plt.legend(loc='upper right')
