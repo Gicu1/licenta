@@ -23,18 +23,22 @@ def run_simulation():
     grid = np.zeros((map_height, map_width), dtype=int)
 
     # Add obstacles
-    obstacles = [(4, 5), (5, 4), (5, 5), (5, 6), (5, 7), (15, 15), (15, 16),(2,9),(2,11),
-                 (3,9),(3,11),(4,9),(4,11),(5,9),(5,11),(6,9),(6,11),(7,9),(7,11),(8,9),(8,11),
-                 (10,9),(10,11),(11,9),(11,11),(12,9),(12,11),(13,11),(14,9),(14,11),(15,9),(15,11),(16,9),(16,11),
-                 (8,12),(9,12),(10,12),(8,8),(9,8),(10,8),(5,8),(8,13),(8,14),(8,15)
-                 , (9,9), (9,11)
-                 , (12,8),(14,8),(12,12),(14,12), (13,8), (13,12), (8,16), (8,17), (8,18), (8,19), (5,3), (5,2), (5,1)
-                #  ,(13,9)
-                 ]
+    obstacles = [
+        (5, 4), (5, 5), (5, 6), (5, 7), (15, 15), (15, 16),(2,9),(2,11),
+        (3,9),(3,11),(4,9),(4,11),(5,9),(5,11),(6,9),(6,11),(7,9),(7,11),(8,9),(8,11),
+        (10,9),(10,11),(11,9),(11,11),(12,9),(12,11),(14,9),(14,11),(15,9),(15,11),(16,9),(16,11),
+        (8,12),(9,12),(10,12),(8,8),(9,8),(10,8),(5,8),(8,13),(8,14),(8,15),
+        (9,9), (9,11),
+        (12,8),(14,8),(12,12),(14,12), (13,8), (13,12), (8,16), (8,17), (8,18), (8,19), (5,3), (5,2), (5,1),
+        (3,0), (3,1), (3,2), (3,3), (3,4), (3,5), (3,6), (3,7),
+        (7,0), (7,1), (7,2), (7,3), (7,4), (7,5), (7,6),
+        (9,1), (9,2), (9,3), (9,4), (9,5), (9,6), (9,7),
+        (11,0), (11,1), (11,2), (11,3), (11,4), (11,5), (11,6),
+    ]
     for (y, x) in obstacles:
         grid[y][x] = 1
 
-    # Initialize robots with different starting positions to avoid initial conflicts
+    # Initialize robots
     robots = [
         Robot(0, 10, 18, 10),
         Robot(18, 9, 1, 11),
@@ -61,7 +65,7 @@ def run_simulation():
 
             # Move each robot
             for i, robot in enumerate(robots):
-                moved = robot.move_towards_goal(grid, robots, step)
+                moved = robot.step(grid, robots, step)
                 moves_made = moves_made or moved
                 log_file.write(f"Robot {i} position: ({robot.x}, {robot.y})\n")
 
@@ -71,7 +75,7 @@ def run_simulation():
 
             # Plot robot paths or current positions
             for i, robot in enumerate(robots):
-                if show_path:
+                if show_path and robot.path:
                     plt.plot([pos[1] for pos in robot.path], [pos[0] for pos in robot.path],
                              color=colors[i % len(colors)], marker='o', label=f"Robot {i+1}")
                 else:
