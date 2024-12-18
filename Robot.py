@@ -86,7 +86,7 @@ class Robot:
         def heuristic(a, b):
             return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
-        # Only four directions (no diagonals)
+        # all directions
         directions = [
             (0, 1),
             (1, 0),
