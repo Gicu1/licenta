@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 from matplotlib.ticker import MaxNLocator
 import os
+import shutil
 from Robot import Robot
 
 def run_simulation():
@@ -10,6 +11,10 @@ def run_simulation():
     output_dir = "C:/school/programare/LICENTA/licenta"
     results_dir = os.path.join(output_dir, "results")
     temp_dir = os.path.join(output_dir, "temp")
+
+    # Clear temp directory if it exists
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
 
     for dir_path in [output_dir, results_dir, temp_dir]:
         if not os.path.exists(dir_path):
@@ -26,7 +31,7 @@ def run_simulation():
     obstacles = [
         (5, 4), (5, 5), (5, 6), (5, 7), (15, 15), (15, 16),(2,9),(2,11),
         (3,9),(3,11),(4,9),(4,11),(5,9),(5,11),(6,9),(6,11),(7,9),(7,11),(8,9),(8,11),
-        (10,9),(10,11),(11,9),(11,11),(12,9),(12,11),(14,9),(14,11),(15,9),(15,11),(16,9),(16,11),
+        (10,9),(10,11),(12,9),(12,11),(14,9),(14,11),(15,9),(15,11),(16,9),(16,11),
         (8,12),(9,12),(10,12),(8,8),(9,8),(10,8),(5,8),(8,13),(8,14),(8,15),
         (9,9), (9,11),
         (12,8),(14,8),(12,12),(14,12), (13,8), (13,12), (8,16), (8,17), (8,18), (8,19), (5,3), (5,2), (5,1),
@@ -34,6 +39,8 @@ def run_simulation():
         (7,0), (7,1), (7,2), (7,3), (7,4), (7,5), (7,6),
         (9,1), (9,2), (9,3), (9,4), (9,5), (9,6), (9,7),
         (11,0), (11,1), (11,2), (11,3), (11,4), (11,5), (11,6),
+        (13,9), (13,11), (11,8), (11,12),
+        # (11,9),(11,11),
     ]
     for (y, x) in obstacles:
         grid[y][x] = 1
