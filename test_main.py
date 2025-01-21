@@ -8,6 +8,26 @@ import time
 from Robot import Robot
 from collections import deque
 import random
+from heapq import heappush, heappop
+
+def plot_map_with_paths(grid, robots, final_paths):
+    """
+    Plot the grid map and overlay the paths of the robots.
+    """
+    plt.figure(figsize=(10,10))
+    height, width = grid.shape
+    # Plot the grid
+    plt.imshow(grid, cmap='gray_r')
+    # Plot the paths
+    for i, path in enumerate(final_paths):
+        x_coords = [pos[1] for pos in path]
+        y_coords = [pos[0] for pos in path]
+        plt.plot(x_coords, y_coords, label=f'Robot {i}')
+        plt.scatter(x_coords[0], y_coords[0], c='green', marker='o')  # Start
+        plt.scatter(x_coords[-1], y_coords[-1], c='red', marker='x')  # Goal
+    plt.legend()
+    plt.title('Map with Paths of Robots')
+    plt.show()
 
 def simulate_scenario(grid, robots, max_steps=100, show_path=False, logging=False):
     """
@@ -87,32 +107,46 @@ def generate_random_robots(grid, num_robots):
 
 def shortest_path_length(grid, start, goal):
     """
-    Compute the shortest path length from start to goal in a grid using BFS.
+    Compute the shortest path length from start to goal in a grid using A* algorithm.
     start, goal: (x, y)
     Returns length of shortest path, or None if no path.
     """
+
     if start == goal:
         return 0
 
     height, width = grid.shape
-    visited = np.zeros((height, width), dtype=bool)
-    queue = deque()
-    queue.append((start[0], start[1], 0))  # (x, y, dist)
-    visited[start[0], start[1]] = True
+    open_set = []
+    heappush(open_set, (0 + heuristic(start, goal), 0, start[0], start[1]))  # (f_score, g_score, x, y)
+    g_score = { (start[0], start[1]): 0 }
+    closed_set = set()
 
-    directions = [(0,1),(1,0),(0,-1),(-1,0)]
-    while queue:
-        x, y, dist = queue.popleft()
+    directions = [ (0,1), (1,0), (0,-1), (-1,0), (1,1), (1,-1), (-1,1), (-1,-1) ]  # Include diagonals
+
+    while open_set:
+        f_score, g, x, y = heappop(open_set)
+
+        if (x, y) == goal:
+            return g
+
+        closed_set.add((x, y))
+
         for dx, dy in directions:
-            nx, ny = x+dx, y+dy
-            if 0 <= nx < height and 0 <= ny < width:
-                if (nx, ny) == goal:
-                    return dist + 1
-                if not visited[nx, ny] and grid[nx, ny] == 0:
-                    visited[nx, ny] = True
-                    queue.append((nx, ny, dist+1))
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < height and 0 <= ny < width and grid[nx][ny] == 0:
+                if (nx, ny) in closed_set:
+                    continue
+                tentative_g_score = g + np.hypot(dx, dy)
+                if (nx, ny) not in g_score or tentative_g_score < g_score[(nx, ny)]:
+                    g_score[(nx, ny)] = tentative_g_score
+                    f = tentative_g_score + heuristic( (nx, ny), goal )
+                    heappush(open_set, (f, tentative_g_score, nx, ny))
 
     return None
+
+def heuristic(a, b):
+    # Using Euclidean distance as heuristic
+    return np.hypot(a[0]-b[0], a[1]-b[1])
 
 
 
@@ -137,6 +171,9 @@ def run_tests(num_tests=10,
     total_robots = 0
     times = []
 
+    min_avg_optimality = None
+    best_scenario = None
+
     for test_id in range(num_tests):
         # Generate scenario
         grid = generate_random_map(width, height, obstacle_ratio=obstacle_ratio)
@@ -155,6 +192,7 @@ def run_tests(num_tests=10,
             if sp is not None and sp > 0:  # Avoid division by zero, sp=0 means start=goal
                 ratio = actual_path_length / sp
                 scenario_ratios.append(ratio)
+                # print (f"Robot {i}: Actual Length: {actual_path_length}, Shortest Path Length: {sp}, Ratio: {ratio:.2f}")
             # If sp is None, no feasible path even ignoring robots. Actual ratio doesn't make sense here.
 
         # Count how many reached goal
@@ -164,6 +202,11 @@ def run_tests(num_tests=10,
 
         if scenario_ratios:
             optimality_ratios.extend(scenario_ratios)
+            avg_optimality = np.mean(scenario_ratios)
+            # Keep track of scenario with smallest average optimality ratio
+            if min_avg_optimality is None or avg_optimality < min_avg_optimality:
+                min_avg_optimality = avg_optimality
+                best_scenario = (grid, robots, final_paths)
 
         times.append(end_time - start_time)
         print(f"Test {test_id+1}/{num_tests}:")
@@ -189,11 +232,17 @@ def run_tests(num_tests=10,
     if avg_time is not None:
         print(f"Average Computation Time per Scenario: {avg_time:.2f} seconds")
 
+    # After testing, show the map with smallest average optimality ratio
+    if best_scenario:
+        grid, robots, final_paths = best_scenario
+        print("\n=== Map with Smallest Average Optimality Ratio ===")
+        print(f"Average Optimality Ratio: {min_avg_optimality:.2f}")
+        plot_map_with_paths(grid, robots, final_paths)
 
 if __name__ == "__main__":
-    run_tests(num_tests=10,
+    run_tests(num_tests=100,
               width=20,
               height=20,
               num_robots=5,
-              obstacle_ratio=0.2,
+              obstacle_ratio=0.3,
               max_steps=100)

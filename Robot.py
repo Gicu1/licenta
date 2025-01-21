@@ -84,7 +84,7 @@ class Robot:
 
     def cooperative_a_star_pathfinding(self, start, goal, other_robots, start_time):
         def heuristic(a, b):
-            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+            return ((a[0] - b[0])**2 + (a[1] - b[1])**2) ** 0.5
 
         # all directions
         directions = [
@@ -115,7 +115,7 @@ class Robot:
                 last_pos = robot.planned_path[-1]
                 lx, ly, lt = last_pos
                 # Reserve extra time steps for final position to avoid collisions
-                for extra_t in range(lt+1, lt+6):
+                for extra_t in range(lt+1, lt+600):
                     reservation_table.add((lx, ly, extra_t))
 
             # Reserve edges from their path
@@ -136,10 +136,17 @@ class Robot:
         heapq.heappush(open_set, (heuristic(start, goal), 0, start_state))
         came_from = {}
         g_score = {start_state: 0}
+        
+        # Max horizon for the search
+        MAX_HORIZON = (self.grid.shape[0] + self.grid.shape[1]) * 4
 
         while open_set:
             _, _, current = heapq.heappop(open_set)
             (cx, cy, ct) = current
+            
+            # If exceeding max horizon, stop search
+            if ct > MAX_HORIZON:
+                return None
 
             if (cx, cy) == goal:
                 # Reconstruct path
