@@ -6,6 +6,8 @@ from matplotlib.ticker import MaxNLocator
 import numpy as np
 import os
 import shutil
+
+# Import your updated Robot class
 from Robot import Robot
 
 class SimulationGUI:
@@ -17,15 +19,10 @@ class SimulationGUI:
         
         # Default simulation parameters
         self.grid_size = (20, 20)  # (width, height)
-        # We'll treat valid row indices in [0..height-1], valid col in [0..width-1].
-        
         self.robots = []     # List of robot dictionaries
         self.obstacles = []  # List of (row, col)
-        
         self.current_robot_config = {}
         self.edit_robot_index = None
-        
-        # For the GIF frames
         self.gif_frames = []
         
         # Main Notebook
@@ -440,7 +437,7 @@ class SimulationGUI:
         self.width_entry.set(self.grid_size[0])
         self.height_entry.set(self.grid_size[1])
         
-        # Obstacles (row, col) in 0..19
+        # Some obstacles (row, col)
         self.obstacles = [
             (5,4), (5,5), (5,6), (5,7), (15,15), (15,16),
             (2,9), (2,11), (3,9), (3,11), (4,9), (4,11), (5,9), (5,11),
@@ -457,7 +454,7 @@ class SimulationGUI:
             (13,9), (13,11), (11,8), (11,12),
         ]
         
-        # Default robots (row, col)
+        # Default robots
         self.robots = [
             {'start_x': 0,  'start_y':10, 'goal_x':18, 'goal_y':10, 'speed':1, 'start_time':0,  'deadline':50},
             {'start_x':18, 'start_y':9,  'goal_x':1,  'goal_y':11, 'speed':1, 'start_time':5,  'deadline':60},
@@ -508,20 +505,22 @@ class SimulationGUI:
         log_path = os.path.join(output_dir, "simulation_log.txt")
         with open(log_path, 'w', encoding='utf-8') as log_file:
             for step in range(max_steps):
+                log_file.write(f"\nStep {step}:\n")
                 # Sort active robots by priority
                 active_robots = [r for r in robots if step >= r.start_time and not r.at_goal()]
                 active_robots.sort(key=Robot.get_priority)
                 
+                # Each active robot attempts to move
                 for r in active_robots:
                     r.step(grid, robots, step)
+                    log_file.write(f"Robot {r.number} at position ({r.x}, {r.y})\n")
                 
                 # Plot
-                fig = plt.figure(figsize=(8,8))
+                plt.figure(figsize=(8,8))
                 plt.imshow(grid, cmap='binary', origin='upper', interpolation='nearest')
                 colors = ["blue","green","red","purple","orange","brown","cyan","magenta"]
                 
                 for r in robots:
-                    # row -> y, col -> x
                     plt.plot(r.y, r.x, marker='o', color=colors[(r.number-1)%len(colors)], markersize=8)
                     label_text = f"S:{r.start_time},D:{r.deadline if r.deadline else '∞'}"
                     plt.text(r.y, r.x, label_text, color="black", fontsize=8, ha="center", va="bottom")
@@ -563,7 +562,7 @@ class SimulationGUI:
         try:
             im = Image.open(path)
             for frame in ImageSequence.Iterator(im):
-                frame = frame.resize((400,400), Image.Resampling.LANCZOS)
+                frame = frame.resize((600,600), Image.Resampling.LANCZOS)
                 self.gif_frames.append(ImageTk.PhotoImage(frame))
         except Exception as e:
             messagebox.showerror("GIF Error", str(e))
