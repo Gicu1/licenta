@@ -500,6 +500,7 @@ class SimulationGUI:
             rob.number = i+1
             robots.append(rob)
         
+        # Robot.clear_reservations() 
         images = []
         max_steps = 200
         log_path = os.path.join(output_dir, "simulation_log.txt")
@@ -508,7 +509,7 @@ class SimulationGUI:
                 log_file.write(f"\nStep {step}:\n")
                 # Sort active robots by priority
                 active_robots = [r for r in robots if step >= r.start_time and not r.at_goal()]
-                active_robots.sort(key=Robot.get_priority)
+                active_robots.sort(key=lambda r: r.get_priority(step))
                 
                 # Each active robot attempts to move
                 for r in active_robots:

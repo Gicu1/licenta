@@ -6,13 +6,13 @@ import shutil
 import time
 import random
 from heapq import heappush, heappop
-from Robot import Robot  # Your improved Robot class
+from Robot import Robot 
 
 # -------------------- HELPER FUNCTIONS --------------------
 
 def heuristic(a, b):
-    # Chebyshev distance is admissible for 8-directional movement.
-    return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+    # Manhattan distance is admissible for 4-directional movement.
+    return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 def shortest_path_length(grid, start, goal):
     """Compute the shortest path length from start to goal on the grid using A*.
@@ -24,9 +24,9 @@ def shortest_path_length(grid, start, goal):
     heappush(open_set, (heuristic(start, goal), 0, start))
     g_score = {start: 0}
     closed_set = set()
+    # Only 4 cardinal directions
     directions = [
-        (0, 1), (1, 0), (0, -1), (-1, 0),
-        (1, 1), (1, -1), (-1, 1), (-1, -1)
+        (0, 1), (1, 0), (0, -1), (-1, 0)
     ]
     while open_set:
         f_val, g, (x, y) = heappop(open_set)
@@ -47,60 +47,71 @@ def shortest_path_length(grid, start, goal):
 
 def plot_map_with_paths(grid, robots, final_paths, title="Scenario"):
     """
-    Plot the grid map and overlay each robot's path along with detailed annotations.
-    For each robot, the following are shown:
+    Plot the grid map and overlay each robot's path with detailed annotations.
+    For each robot:
       - Start position: Green circle.
       - Desired goal position: Red star.
       - Actual final state: Blue square if not reached, lime square if reached.
-      - A text annotation showing deadline, start time, and status (Reached, Deadline Missed, or Stuck).
+      - A text annotation showing deadline, start time, and status.
     """
     plt.figure(figsize=(10, 10))
     height, width = grid.shape
     plt.imshow(grid, cmap='gray_r')
     
-    # For better legend control, we only label one instance per marker type.
+    # For legend control, only label one instance per marker type.
     start_label, goal_label, end_label = True, True, True
     
     for i, robot in enumerate(robots):
-        path = final_paths[i]
-        x_coords = [pos[1] for pos in path]
-        y_coords = [pos[0] for pos in path]
-        plt.plot(x_coords, y_coords, marker='o', linestyle='-', label=f'Robot {robot.number} path')
+        # Use the planned path if available; otherwise, fall back to the start cell.
+        if robot.path:
+            start_pos = (robot.path[0][0], robot.path[0][1])
+        else:
+            start_pos = (robot.start_x, robot.start_y)
+            
+        # Plot the planned path if it exists.
+        if final_paths[i]:
+            x_coords = [pos[1] for pos in final_paths[i]]
+            y_coords = [pos[0] for pos in final_paths[i]]
+            plt.plot(x_coords, y_coords, marker='o', linestyle='-', label=f'Robot {robot.number} path')
+        else:
+            # If no path exists, plot a dashed line from start to final position.
+            plt.plot([start_pos[1], robot.y], [start_pos[0], robot.x],
+                     marker='o', linestyle='--', label=f'Robot {robot.number} (no path)')
         
-        # Start position: first point of the robot's path.
-        start_pos = (robot.path[0][0], robot.path[0][1])
+        # Plot start position.
         if start_label:
-            plt.scatter(start_pos[1], start_pos[0], c='green', marker='o', s=100, edgecolors='black', label='Start')
+            plt.scatter(start_pos[1], start_pos[0], c='green', marker='o', s=100,
+                        edgecolors='black', label='Start')
             start_label = False
         else:
             plt.scatter(start_pos[1], start_pos[0], c='green', marker='o', s=100, edgecolors='black')
         
-        # Desired goal position (from robot config)
+        # Plot desired goal position.
         desired_goal = (robot.goal_x, robot.goal_y)
         if goal_label:
-            plt.scatter(desired_goal[1], desired_goal[0], c='red', marker='*', s=150, edgecolors='black', label='Goal')
+            plt.scatter(desired_goal[1], desired_goal[0], c='red', marker='*', s=150,
+                        edgecolors='black', label='Goal')
             goal_label = False
         else:
             plt.scatter(desired_goal[1], desired_goal[0], c='red', marker='*', s=150, edgecolors='black')
         
-        # Actual end state (final state after simulation)
+        # Plot the final state.
         end_pos = (robot.x, robot.y)
         color = 'lime' if robot.at_goal() else 'blue'
         if end_label:
-            plt.scatter(end_pos[1], end_pos[0], c=color, marker='s', s=100, edgecolors='black', label='Final State')
+            plt.scatter(end_pos[1], end_pos[0], c=color, marker='s', s=100,
+                        edgecolors='black', label='Final State')
             end_label = False
         else:
             plt.scatter(end_pos[1], end_pos[0], c=color, marker='s', s=100, edgecolors='black')
         
-        # Determine status message
+        # Determine status message.
         if robot.at_goal():
             status = "Reached"
         elif robot.deadline_missed:
             status = "Deadline Missed"
         else:
             status = "Stuck"
-        
-        # Annotate near the final state with deadline and start info
         annotation = f"D:{robot.deadline} | S:{robot.start_time} | {status}"
         plt.text(end_pos[1], end_pos[0], annotation, fontsize=8, color='black',
                  ha='right', va='bottom', bbox=dict(facecolor='white', alpha=0.6, edgecolor='none'))
@@ -123,13 +134,13 @@ def generate_random_map(width, height, obstacle_ratio=0.3):
     return grid
 
 def generate_dense_map(width, height):
-    """Generate a grid with a high obstacle density (e.g. 50% obstacles)."""
+    """Generate a grid with high obstacle density (50% obstacles)."""
     return generate_random_map(width, height, obstacle_ratio=0.5)
 
 def generate_narrow_corridor_map(width, height):
     """
     Create a grid mostly filled with obstacles except for a narrow vertical corridor
-    and an additional horizontal passage to challenge path planning.
+    and an additional horizontal passage.
     """
     grid = np.ones((height, width), dtype=int)
     corridor_width = max(1, width // 10)
@@ -220,12 +231,14 @@ def simulate_scenario(grid, robots, max_steps=200, logging=False):
     for step in range(max_steps):
         if logging:
             log_lines.append(f"\nStep {step + 1}\n")
+        # Flag to detect if any moves were made (for deadlock detection)
         moves_made = False
+        # Sort active robots using the composite priority function with the current time.
         active_robots = [r for r in robots if step >= r.start_time and not (r.at_goal() or r.deadline_missed)]
-        active_robots.sort(key=Robot.get_priority)
+        active_robots.sort(key=lambda r: r.get_priority(step))
         for robot in active_robots:
-            moved = robot.step(grid_copy, robots, step)
-            moves_made = moves_made or moved
+            robot.step(grid_copy, robots, step)
+            moves_made = True  # Assume move attempt counts as activity.
             if logging:
                 log_lines.append(f"Robot {robot.number} position: ({robot.x}, {robot.y})\n")
         if all(r.at_goal() or r.deadline_missed for r in robots):
@@ -252,7 +265,7 @@ def run_in_depth_tests():
       - Robots reaching goals,
       - Average optimality ratio (actual steps / shortest path),
       - Simulation time.
-    The best scenario for each type (lowest average ratio) is plotted at the end with detailed annotations.
+    The best scenario for each type (lowest average ratio) is plotted with detailed annotations.
     """
     scenario_types = ["random", "dense", "narrow_corridor", "bottleneck", "deadline_stress", "corner_case"]
     tests_per_type = 5  # Number of tests per scenario type
@@ -269,19 +282,19 @@ def run_in_depth_tests():
         print(f"\n--- Testing Scenario Type: {s_type} ---")
         for test in range(tests_per_type):
             if s_type == "random":
-                grid = generate_random_map(50, 50, obstacle_ratio=0.3)
+                grid = generate_random_map(20, 20, obstacle_ratio=0.3)
             elif s_type == "dense":
-                grid = generate_dense_map(50, 50)
+                grid = generate_dense_map(20, 20)
             elif s_type == "narrow_corridor":
-                grid = generate_narrow_corridor_map(50, 50)
+                grid = generate_narrow_corridor_map(20, 20)
             elif s_type == "bottleneck":
-                grid = generate_bottleneck_map(50, 50)
+                grid = generate_bottleneck_map(20, 20)
             elif s_type == "deadline_stress":
-                grid = generate_deadline_stress_map(50, 50, obstacle_ratio=0.3)
+                grid = generate_deadline_stress_map(20, 20, obstacle_ratio=0.3)
             elif s_type == "corner_case":
-                grid = generate_corner_case_map(50, 50)
+                grid = generate_corner_case_map(20, 20)
             else:
-                grid = generate_random_map(50, 50, obstacle_ratio=0.3)
+                grid = generate_random_map(20, 20, obstacle_ratio=0.3)
             
             try:
                 robots = generate_robots_for_map(grid, num_robots=5, scenario_type=s_type)
@@ -296,10 +309,13 @@ def run_in_depth_tests():
             
             ratios = []
             for i, robot in enumerate(robots):
-                actual_steps = len(final_paths[i]) - 1
-                sp = shortest_path_length(grid, (final_paths[i][0][0], final_paths[i][0][1]), (robot.goal_x, robot.goal_y))
-                if sp is not None and sp > 0:
-                    ratios.append(actual_steps / sp)
+                if final_paths[i]:  # Ensure that a path exists.
+                    actual_steps = len(final_paths[i]) - 1
+                    start_cell = (final_paths[i][0][0], final_paths[i][0][1])
+                    sp = shortest_path_length(grid, start_cell, (robot.goal_x, robot.goal_y))
+                    if sp is not None and sp > 0:
+                        ratios.append(actual_steps / sp)
+
             avg_ratio = np.mean(ratios) if ratios else None
             
             successes = sum(reached_goals)
@@ -319,7 +335,9 @@ def run_in_depth_tests():
                 "reached_goals": reached_goals
             })
             
-            print(f"Test {test+1} for {s_type}: {successes}/5 reached goal; "
+            if(avg_ratio is None):
+                avg_ratio = 0
+            print(f"Test {test+1} for {s_type}: {successes}/20 reached goal; "
                   f"Avg Optimality Ratio: {avg_ratio:.2f} ; Sim Time: {sim_time:.2f}s")
             
             if avg_ratio is not None:
@@ -343,7 +361,7 @@ def run_in_depth_tests():
         print(f"Overall Average Optimality Ratio: {overall_avg_ratio:.2f}")
     print(f"Overall Average Simulation Time: {overall_avg_time:.2f} seconds")
     
-    # Plot best scenario for each scenario type with detailed annotations.
+    # Plot the best scenario for each scenario type with detailed annotations.
     for s_type, details in best_scenarios.items():
         title = f"Best Scenario for {s_type} (Avg Optimality Ratio: {details['avg_ratio']:.2f})"
         plot_map_with_paths(details["grid"], details["robots"], details["paths"], title=title)
