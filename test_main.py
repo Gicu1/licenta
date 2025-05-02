@@ -16,10 +16,10 @@ except ImportError:
     sys.exit() # Use sys.exit() for cleaner exit in scripts
 
 # -------------------- Constants --------------------
-GRID_WIDTH = 20
-GRID_HEIGHT = 20
-NUM_ROBOTS_PER_TEST = 6 # Reduced default for faster testing
-TESTS_PER_TYPE = 3      # Number of random instances per scenario type
+GRID_WIDTH = 50
+GRID_HEIGHT = 50
+NUM_ROBOTS_PER_TEST = 15 
+TESTS_PER_TYPE = 20      # Number of random instances per scenario type
 MAX_SIMULATION_STEPS = 300 # Max steps before simulation terminates
 DEFAULT_OBSTACLE_RATIO = 0.25
 HIGH_OBSTACLE_RATIO = 0.40
@@ -527,7 +527,7 @@ def run_in_depth_tests():
             for robot in final_robots:
                 if robot.at_goal() and robot.path and len(robot.path) > 1:
                     # Path length is number of states - 1 = number of steps taken
-                    actual_steps = len(robot.path) - 1
+                    actual_steps = robot.total_moves
                     sp = shortest_path_length(grid, (robot.start_x, robot.start_y), (robot.goal_x, robot.goal_y))
                     if sp is not None and sp > 0:
                         ratio = actual_steps / sp

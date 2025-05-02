@@ -63,10 +63,16 @@ class Robot:
         self.path_index: int = 0     # Index into self.path corresponding to the state for the *current* time
         self.at_goal_flag: bool = False # True if the robot has reached its goal
         self.deadline_missed: bool = False # True if the robot cannot reach goal by deadline or failed planning
+        self.total_moves: int = 0          # how many times we executed an action
+        self.arrival_time: Optional[int] = None  # wall‑clock time when goal reached
+        
+        # Counter for consecutive planning failures to detect stuck robots
+        self.consecutive_planning_failures: int = 0
+        self.max_planning_failures: int = 5  # Mark as failed after this many consecutive failures
 
         # Stores the set of (row, col, t) states currently reserved by this robot instance.
         self.my_reservations: Set[State] = set()
-
+        
     def __repr__(self) -> str:
         """Provides a string representation of the robot's current state."""
         status = "Goal" if self.at_goal() else ("Failed" if self.deadline_missed else "Active")
@@ -176,7 +182,7 @@ class Robot:
     def plan_path(self, grid: Grid, current_time: TimeStep) -> Optional[Path]:
         """
         Plans a collision-free path from the current position and time to the goal
-        using time-expanded A* search.
+        using time-expanded A* search. Treats robots at goals as permanent obstacles.
 
         Args:
             grid (Grid): The static environment grid (0=free, 1=obstacle).
@@ -190,20 +196,34 @@ class Robot:
 
         # --- Initial Checks ---
         if self.at_goal(): # If already at the goal when planning is requested
-             stay_state: State = (self.x, self.y, current_time)
-             # Ensure reservation exists for staying put at the current time
-             if stay_state not in self.my_reservations:
-                 current_res = Robot.reservation_table.get(stay_state)
-                 if current_res is None: # If no one has it, reserve it
-                     Robot.reservation_table[stay_state] = self
-                     self.my_reservations.add(stay_state)
-                 elif current_res is not self: # Someone else has our goal cell reserved now? Problem!
-                      print(f"ERROR: Robot {self.robot_id} at goal but Robot {current_res.robot_id} holds reservation {stay_state}", file=sys.stderr)
-                      return None # Cannot stay at goal if someone else reserved it
-             return [stay_state] # Path is just staying put at the current time
+            stay_state: State = (self.x, self.y, current_time)
+            # Ensure reservation exists for staying put at the current time
+            if stay_state not in self.my_reservations:
+                current_res = Robot.reservation_table.get(stay_state)
+                if current_res is None: # If no one has it, reserve it
+                    Robot.reservation_table[stay_state] = self
+                    self.my_reservations.add(stay_state)
+                elif current_res is not self: # Someone else has our goal cell reserved now? Problem!
+                    print(f"ERROR: Robot {self.robot_id} at goal but Robot {current_res.robot_id} holds reservation {stay_state}", file=sys.stderr)
+                    return None # Cannot stay at goal if someone else reserved it
+            return [stay_state] # Path is just staying put at the current time
 
         # Clear previous reservations before planning a new path
         self.remove_reservations()
+
+        # --- Create a planning grid that includes robots at goals as obstacles ---
+        planning_grid = grid.copy()
+        robots_at_goal = set()
+        
+        # Find all robots at goals and mark their positions as obstacles
+        for state, robot in Robot.reservation_table.items():
+            if robot is not self and robot.at_goal():
+                planning_grid[robot.goal_x, robot.goal_y] = 1  # Mark as obstacle
+                robots_at_goal.add((robot.goal_x, robot.goal_y))  # Save for debug/logging if needed
+        
+        # If debug info is wanted:
+        # if robots_at_goal:
+        #     print(f"DEBUG: Robot {self.robot_id} planning with {len(robots_at_goal)} robots at goals as obstacles")
 
         # --- A* Setup ---
         start_state: State = (self.x, self.y, current_time)
@@ -240,13 +260,13 @@ class Robot:
             # --- Pruning ---
             # 1. Time Limit Pruning: Stop searching if time exceeds planning horizon or deadline
             if t >= max_plan_time:
-                 continue
+                continue
 
             # 2. Already Found Better Path (Closed Set Check):
             # If we pulled a state from PQ but have already found a shorter path (lower g)
             # to it previously, skip processing this one.
             if g_score > cost_so_far.get(current_state, float('inf')):
-                 continue
+                continue
 
             # --- Explore Neighbors ---
             for dx, dy in Robot.DIRECTIONS:
@@ -257,12 +277,12 @@ class Robot:
                 # 1. Bounds Check
                 if not (0 <= next_x < rows and 0 <= next_y < cols):
                     continue
-                # 2. Static Obstacle Check
-                if grid[next_x, next_y] == 1:
+                # 2. Static Obstacle Check (using planning_grid that includes robots at goals)
+                if planning_grid[next_x, next_y] == 1:
                     continue
                 # 3. Deadline Check (Check before adding neighbor)
                 if self.deadline is not None and next_t > self.deadline:
-                     continue
+                    continue
 
                 neighbor_state: State = (next_x, next_y, next_t)
 
@@ -279,9 +299,9 @@ class Robot:
                 occupier_swap_origin = Robot.reservation_table.get(swap_origin_state)
                 # Check if the potential swapper exists and is not us
                 if occupier_swap_origin is not None and occupier_swap_origin is not self:
-                     # Check if *that same robot* has reserved the cell we are currently in for the next timestep
-                     if Robot.reservation_table.get(swap_target_state) is occupier_swap_origin:
-                          continue # Swap conflict detected
+                    # Check if *that same robot* has reserved the cell we are currently in for the next timestep
+                    if Robot.reservation_table.get(swap_target_state) is occupier_swap_origin:
+                        continue # Swap conflict detected
 
                 # --- Process Valid Neighbor ---
                 new_g_score = g_score + 1 # Cost increases by 1 timestep
@@ -298,10 +318,10 @@ class Robot:
             # Set deadline_missed *only* if a deadline exists and might have been violated
             if self.deadline is not None and current_time < self.deadline:
                 # If deadline exists but hasn't passed yet, failure implies blocked path
-                 self.deadline_missed = True # Or introduce a 'stuck' flag? For now, mark failed.
+                self.deadline_missed = True # Or introduce a 'stuck' flag? For now, mark failed.
             # If deadline passed during planning, A* wouldn't have found it -> failed.
             elif self.deadline is not None and current_time >= self.deadline:
-                 self.deadline_missed = True
+                self.deadline_missed = True
             # print(f"DEBUG: Robot {self.robot_id} failed to find path from ({self.x},{self.y}) at t={current_time}.")
             return None
 
@@ -321,7 +341,7 @@ class Robot:
         # Reserve the path in the shared table and local set
         self._reserve_path(path)
         return path
-
+    
     def step(self, grid: Grid, all_robots: List['Robot'], current_time: TimeStep) -> None:
         """
         Executes one simulation time step for the robot.
@@ -341,14 +361,15 @@ class Robot:
 
         if self.at_goal():
             # print(f"DEBUG: R{self.robot_id} already at goal.")
-            # If at goal, ensure reservation for *waiting* at goal persists for next step
-            goal_state_next_t: State = (self.goal_x, self.goal_y, current_time + 1)
-            if goal_state_next_t not in self.my_reservations:
-                 current_res = Robot.reservation_table.get(goal_state_next_t)
-                 if current_res is None: # If no one has it, reserve it
-                      Robot.reservation_table[goal_state_next_t] = self
-                      self.my_reservations.add(goal_state_next_t)
-                 # If someone else has it, we don't overwrite here (handled by planner/priority)
+            # If at goal, ensure reservation for *waiting* at goal persists for next steps
+            # Reserve multiple steps ahead to prevent other robots from planning through this position
+            for t_offset in range(1, 6):  # Reserve 5 steps ahead
+                goal_state_future: State = (self.goal_x, self.goal_y, current_time + t_offset)
+                if goal_state_future not in self.my_reservations:
+                    current_res = Robot.reservation_table.get(goal_state_future)
+                    if current_res is None: # If no one has it, reserve it
+                        Robot.reservation_table[goal_state_future] = self
+                        self.my_reservations.add(goal_state_future)
             return # Already finished task
 
         if self.deadline_missed:
@@ -365,24 +386,24 @@ class Robot:
             # Validate current state against the expected state in the path
             expected_state = self.path[self.path_index]
             if expected_state[0] != self.x or expected_state[1] != self.y or expected_state[2] != current_time:
-                 # Robot's current state doesn't match the plan's expectation for this time step
-                 needs_plan = True
-                 # print(f"DEBUG: R{self.robot_id} needs plan (state mismatch: plan={expected_state}, actual=({self.x},{self.y},{current_time}))")
+                # Robot's current state doesn't match the plan's expectation for this time step
+                needs_plan = True
+                # print(f"DEBUG: R{self.robot_id} needs plan (state mismatch: plan={expected_state}, actual=({self.x},{self.y},{current_time}))")
 
         if needs_plan:
             # print(f"DEBUG: R{self.robot_id} planning at t={current_time} from ({self.x},{self.y})")
             new_path = self.plan_path(grid, current_time)
             if new_path is None:
                 # Planning failed (no path found or hit deadline/limits)
-                # print(f"INFO: R{self.robot_id} failed planning at t={current_time}. Marking failed.")
-                # Mark as failed only if deadline exists and is possibly violated
-                if self.deadline is not None and current_time >= self.deadline:
+                self.consecutive_planning_failures += 1
+                # print(f"INFO: R{self.robot_id} failed planning at t={current_time}. Failure count: {self.consecutive_planning_failures}")
+                
+                # Mark as failed if: deadline exists and is violated, OR too many consecutive failures
+                if (self.deadline is not None and current_time >= self.deadline) or \
+                (self.consecutive_planning_failures >= self.max_planning_failures):
                     self.deadline_missed = True
-                # If no deadline, it might just be temporarily blocked. Don't mark failed yet.
-                # We might want a 'stuck' counter here. For now, just fail if deadline involved.
-                elif self.deadline is not None:
-                     self.deadline_missed = True # Assume blocked path violates implicit deadline goal
-
+                    print(f"INFO: R{self.robot_id} marked as failed after {self.consecutive_planning_failures} planning attempts at t={current_time}.")
+                
                 self.remove_reservations() # Clean up any potential remnants from failed plan
                 self.path = [] # Ensure path is empty
                 self.path_index = 0
@@ -390,6 +411,7 @@ class Robot:
                 return
             else:
                 # Successfully planned a new path
+                self.consecutive_planning_failures = 0  # Reset counter on successful planning
                 self.path = new_path
                 self.path_index = 0 # Start executing from the beginning of the new path
                 # print(f"DEBUG: R{self.robot_id} new path planned (len={len(self.path)}): {self.path[:min(5, len(self.path))]}")
@@ -401,7 +423,7 @@ class Robot:
             # This implies planning failed or there's a logic error
             if self.path: # Log error only if path exists but is inconsistent
                 print(f"CRITICAL ERROR: R{self.robot_id} invalid path state before move check! "
-                      f"Path: {self.path}, Index: {self.path_index}, Time: {current_time}", file=sys.stderr)
+                    f"Path: {self.path}, Index: {self.path_index}, Time: {current_time}", file=sys.stderr)
                 self.deadline_missed = True # Fail safe
                 self.remove_reservations()
             # If path is empty (planning failed), normal exit, do nothing.
@@ -418,18 +440,18 @@ class Robot:
                 is_waiting = (intended_state_next_t[0] == self.x and intended_state_next_t[1] == self.y)
             else:
                 # This suggests a time gap in the plan, which shouldn't happen
-                 print(f"ERROR: R{self.robot_id} path time jump detected! Path={self.path}, Idx={self.path_index}, Time={current_time}", file=sys.stderr)
-                 # Assume wait as fallback? Risky. Invalidate plan.
-                 self.path = []
-                 self.path_index = 0
-                 self.remove_reservations()
-                 return
+                print(f"ERROR: R{self.robot_id} path time jump detected! Path={self.path}, Idx={self.path_index}, Time={current_time}", file=sys.stderr)
+                # Assume wait as fallback? Risky. Invalidate plan.
+                self.path = []
+                self.path_index = 0
+                self.remove_reservations()
+                return
         else:
             # Reached end of path according to index. Should imply goal reached.
             # The intended action is to stay put (wait) at the goal.
             if not (self.x == self.goal_x and self.y == self.goal_y):
-                 print(f"WARN: R{self.robot_id} path ended at index {self.path_index} ({self.path[-1]}) but not at goal ({self.goal_x},{self.goal_y})", file=sys.stderr)
-                 # Path might have been truncated? Or planning error? Treat as stuck/wait.
+                print(f"WARN: R{self.robot_id} path ended at index {self.path_index} ({self.path[-1]}) but not at goal ({self.goal_x},{self.goal_y})", file=sys.stderr)
+                # Path might have been truncated? Or planning error? Treat as stuck/wait.
             intended_state_next_t = (self.x, self.y, current_time + 1)
             is_waiting = True
 
@@ -451,10 +473,10 @@ class Robot:
             occupier_swap_origin = Robot.reservation_table.get(swap_origin_state)
             # If the origin cell is occupied by someone else...
             if occupier_swap_origin is not None and occupier_swap_origin is not self:
-                 # ...and that same robot has reserved our current cell for the next step
-                 if Robot.reservation_table.get(swap_target_state) is occupier_swap_origin:
-                     conflict_detected = True
-                     conflict_reason = f"Swap conflict with R{occupier_swap_origin.robot_id} involving move to {intended_state_next_t[:2]}"
+                # ...and that same robot has reserved our current cell for the next step
+                if Robot.reservation_table.get(swap_target_state) is occupier_swap_origin:
+                    conflict_detected = True
+                    conflict_reason = f"Swap conflict with R{occupier_swap_origin.robot_id} involving move to {intended_state_next_t[:2]}"
 
         # --- 4. Handle Conflict (Replan) or Execute Move ---
         executed_action = False # Flag to indicate if an action (move/wait) was determined for this step
@@ -465,12 +487,20 @@ class Robot:
 
             if new_path is None:
                 # Replan also failed. Robot is stuck this step.
-                 # print(f"WARN: R{self.robot_id} failed to replan after conflict. Stuck at t={current_time}.")
-                 self.path = [] # Invalidate path, force replan next time
-                 self.path_index = 0
-                 # Do not move, action not executed
+                self.consecutive_planning_failures += 1
+                # print(f"WARN: R{self.robot_id} failed to replan after conflict. Stuck at t={current_time}. Failures: {self.consecutive_planning_failures}")
+                
+                # Mark as failed if too many consecutive planning failures
+                if self.consecutive_planning_failures >= self.max_planning_failures:
+                    self.deadline_missed = True
+                    print(f"INFO: R{self.robot_id} marked as failed after {self.consecutive_planning_failures} replanning attempts at t={current_time}.")
+                    
+                self.path = [] # Invalidate path, force replan next time
+                self.path_index = 0
+                # Do not move, action not executed
             else:
                 # Replan succeeded, use the new path
+                self.consecutive_planning_failures = 0  # Reset counter on successful replanning
                 # print(f"DEBUG: R{self.robot_id} replanned successfully after conflict. New path length: {len(new_path)}")
                 self.path = new_path
                 self.path_index = 0
@@ -483,24 +513,75 @@ class Robot:
                         self.y = state_after_move[1]
                         executed_action = True
                     else: # New plan starts with wait or has time jump (error case handled above)
-                         # Position doesn't change if waiting
-                         executed_action = True # "Wait" is the executed action
+                        # Position doesn't change if waiting
+                        executed_action = True # "Wait" is the executed action
                 else: # New path is just current state (e.g., plan resulted in staying put)
-                     executed_action = True # "Wait" is the action
+                    executed_action = True # "Wait" is the action
 
         else:
-            # No conflict detected, execute move/wait based on original intended_state_next_t
-            self.x = intended_state_next_t[0]
-            self.y = intended_state_next_t[1]
-            executed_action = True
-            # if is_waiting: print(f"DEBUG: R{self.robot_id} is waiting at ({self.x},{self.y})")
-            # else: print(f"DEBUG: R{self.robot_id} moved to ({self.x},{self.y})")
-
+            # No conflict detected in reservations, but we need to check for robots physically at the intended position
+            target_x, target_y = intended_state_next_t[0], intended_state_next_t[1]
+            
+            # Check if any other robot is physically at our intended next position
+            occupied_by_robot_at_goal = False
+            for other_robot in all_robots:
+                # Skip ourselves and robots not yet started
+                if other_robot is self or current_time < other_robot.start_time:
+                    continue
+                    
+                # Check if other robot is at the target position AND at its goal
+                if (other_robot.x == target_x and other_robot.y == target_y and 
+                    other_robot.at_goal()):
+                    occupied_by_robot_at_goal = True
+                    conflict_reason = f"Runtime collision with R{other_robot.robot_id} at goal position ({target_x},{target_y})"
+                    # print(f"INFO: R{self.robot_id} detected physical robot {other_robot.robot_id} at target position. Replanning.")
+                    break
+                    
+            if occupied_by_robot_at_goal:
+                # Similar to conflict handling - try to replan
+                new_path = self.plan_path(grid, current_time)
+                
+                if new_path is None:
+                    # Replan failed, increment failure counter and potentially mark as failed
+                    self.consecutive_planning_failures += 1
+                    if self.consecutive_planning_failures >= self.max_planning_failures:
+                        self.deadline_missed = True
+                        print(f"INFO: R{self.robot_id} marked as failed after {self.consecutive_planning_failures} replanning attempts at t={current_time}.")
+                        
+                    self.path = [] # Invalidate path, force replan next time
+                    self.path_index = 0
+                    # Do not move, action not executed
+                else:
+                    # Replan succeeded, use the new path
+                    self.consecutive_planning_failures = 0
+                    self.path = new_path
+                    self.path_index = 0
+                    if self.path_index + 1 < len(self.path):
+                        state_after_move = self.path[self.path_index + 1]
+                        if state_after_move[2] == current_time + 1:
+                            # Execute move from new plan
+                            self.x = state_after_move[0]
+                            self.y = state_after_move[1]
+                            executed_action = True
+                        else:
+                            # Position doesn't change if waiting
+                            executed_action = True # "Wait" is the executed action
+                    else:
+                        executed_action = True # "Wait" is the action
+            else:
+                # No robots at the target position, execute move normally
+                self.x = intended_state_next_t[0]
+                self.y = intended_state_next_t[1]
+                executed_action = True
+        
 
         # --- 5. Advance Path Index if an Action Was Taken ---
         if executed_action:
-             # We processed the state for current_time, advance index for the next step
-             self.path_index += 1
+            # We processed the state for current_time, advance index for the next step
+            self.path_index += 1
+            # Reset consecutive failures counter since we executed an action
+            self.consecutive_planning_failures = 0
+            self.total_moves += 1
         # else: Robot got stuck, index remains same, will likely replan next step
 
 
@@ -508,14 +589,16 @@ class Robot:
         # Check if the *new* position (after move/wait) is the goal
         if self.x == self.goal_x and self.y == self.goal_y:
             if not self.at_goal_flag:
-                 # print(f"INFO: R{self.robot_id} reached goal ({self.x},{self.y}) at end of step {current_time}.")
-                 self.at_goal_flag = True
-                 # Optional: Trim path if desired, reduces memory for reservations
-                 # self.path = self.path[:self.path_index]
-                 # Make sure goal is reserved for next step after arriving
-                 goal_state_next_t: State = (self.goal_x, self.goal_y, current_time + 1)
-                 if goal_state_next_t not in self.my_reservations:
-                    current_res = Robot.reservation_table.get(goal_state_next_t)
-                    if current_res is None:
-                        Robot.reservation_table[goal_state_next_t] = self
-                        self.my_reservations.add(goal_state_next_t)
+                # print(f"INFO: R{self.robot_id} reached goal ({self.x},{self.y}) at end of step {current_time}.")
+                self.at_goal_flag = True
+                # Optional: Trim path if desired, reduces memory for reservations
+                # self.path = self.path[:self.path_index]
+                self.arrival_time = current_time + 1   # reached at the END of this step
+                # Reserve goal position for several steps ahead to ensure other robots treat it as obstacle
+                for t_offset in range(1, 20):  # Reserve 20 steps ahead
+                    goal_state_future: State = (self.goal_x, self.goal_y, current_time + t_offset)
+                    if goal_state_future not in self.my_reservations:
+                        current_res = Robot.reservation_table.get(goal_state_future)
+                        if current_res is None:
+                            Robot.reservation_table[goal_state_future] = self
+                            self.my_reservations.add(goal_state_future)
